@@ -1,0 +1,54 @@
+
+<line> ::= <any> ';
+<block> = '{ [ <line> | <block> ]* '}
+
+// setup
+
+<setup> ::= 'setup '{ <setup-line> ... '}
+
+<setup-line> ::= <setup-line-many>
+               | <setup-line-single>
+
+<setup-line-many> ::= <setup-line-many-name> '{ <value>[, <value> ...] '}
+<setup-line-single> ::= <setup-line-single-name> '= <value> ';
+
+<setup-line-many-name> ::= 'alphabet
+<setup-line-single-name> ::= 'blank_symbol
+                           | 'max_type_size
+                           | 'max_number_transitions
+
+// alias
+
+<alias> ::= 'alias '{ <alias-line> ... '}
+<alias-line> ::= 'state <state-name> '= <state-name> ';
+
+<state-name> ::=  <identifier>
+
+<identifier> ::= /[A-Za-z_]\w*/
+<int> ::= /\d+/
+<for-arg> ::= <identifier> 'from <int> 'to <int>
+
+// declare
+
+<declare> ::= 'declare '{ <declare-line> ... '}
+<declare-line> ::= <state-declaration>;
+                | 'for '( <for-arg> ') '{ <declare-line> '}
+
+<state-declaration> ::= 'state <state-name>;
+                      | 'init [ 'state ]? <state-name>;
+                      | 'final [ 'state ]? <state-name>;
+
+// transition
+
+<transition> ::= 'transition '{ <transition-block> ... '}
+<transition-block> ::= <when-block>
+                     | 'for '( <for-arg> ') '{ <transition-block> '}
+
+<when-block> ::= 'when '( 'state <state-name> ') '{ <if-block> ... '}
+<if-block> ::= 'if '( 'read <value> ') '{ <action-line> ... '}
+<action-line> ::= 'goto <state-goto> ';
+                | 'write <value> ';
+                | 'header [ '< | '> ] <int> ';
+
+<state-goto> ::= <state-name>
+               | <state-name>[ '+ | '- ]

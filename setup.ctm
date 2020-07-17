@@ -1,0 +1,9 @@
+setup {
+    alphabet {
+        0, 1;
+    }
+    blank_symbol = 0;
+    max_tape_size = 200;
+    max_number_transitions = 500;
+}
+

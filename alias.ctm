@@ -1,0 +1,7 @@
+alias {
+	state qw = q3;
+	state qs = q4;
+	state qlso = q5;
+	state qb = q6;
+	state qfail = q7;
+}
