@@ -10,6 +10,8 @@
          tokens-tuple-rest
          parse-setup
          parse-alias
+         parse-declare
+         parse-comma-values-semicol
          get-semicol-line
          get-for-loop
          get-block
@@ -20,6 +22,12 @@
   (if msg
     (error 'Syntax-error msg)
     (error 'Syntax-error)))
+
+(define (error-index [msg #f])
+  (if msg
+    (error 'Index-error msg)
+    (error 'Index-error)))
+
 
 (struct tokens-tuple (main rest))
 
@@ -87,10 +95,22 @@
      (match-define (list id 'FROM low 'TO high) for-args)
      (tokens-tuple (ForLoop id low high for-body) rest)]))
 
-(define (unwrap-for for-loop)
-  ; TO DO
-  for-loop)
-
+; unwrap-for: ForLoop List[Cons[<id> <id>]] (List[tokens] List[Cons[<id> <id>]] -> List[tokens]) -> List[tokens]
+(define (unwrap-for for-loop index-subst callback)
+  (match-define (ForLoop (list 'ID id) (list 'INT low) (list 'INT high) body) for-loop)
+  (when (not (integer? low))
+    (error-syntax (format "Lower bound ~a is not an integer" low)))
+  (when (not (integer? high))
+    (error-syntax (format "Upper bound ~a is not an integer" high)))
+  (when (> low high)
+    (error-index (format "Index ~a goes from ~a up to ~a~" id low high)))
+  (let loop ([current low] [acc '()])
+    (if (> current high)
+      (reverse acc)
+      (loop (add1 current)
+            (cons (car (callback body (cons (cons id current)
+                                     index-subst)))
+                  acc)))))
 
 ;; Main parser
 (define (ctm-parse tokens)
@@ -142,7 +162,7 @@
 
 (define (parse-comma-values-semicol token-list)
   (match token-list
-   [(list x 'SEMICOL) x]
+   [(list x 'SEMICOL) (cons x '())]
    [(list x 'COMMA xs ...) (cons x (parse-comma-values-semicol xs))]))
 
 ;; Parse alias
@@ -166,17 +186,42 @@
     [(INIT FINAL STATE) 'state-declaration]
     [(FOR) 'for-loop]))
 
-(define (parse-declare-statements token-list [acc '()])
+(define (parse-declare-statements token-list [index-subst '()] [acc '()])
   (match token-list
     [(cons stmt-head xs)
      (match (declare-statement-type stmt-head)
        ['for-loop
           (match-define (tokens-tuple for-loop rest) (get-for-loop token-list))
-          (parse-declare-statements rest (cons (unwrap-for for-loop)
-                                                acc))]
-       ['state-declaration  #| TODO |# #f])]
+          (parse-declare-statements rest index-subst (append (reverse (unwrap-for for-loop index-subst (lambda (body idx-subst)
+                                                                                             (parse-declare-statements body idx-subst))))
+                                                      acc))]
+       ['state-declaration
+          (match-define (tokens-tuple line rest) (get-semicol-line token-list))
+          (parse-declare-statements rest index-subst
+                                         (cons (parse-state-declaration line index-subst)
+                                               acc))])]
     ['() (reverse acc)]))
 
+
+(struct State (id init final) #:transparent)
+(define (parse-state-declaration tokens index-subst [init #f] [final #f])
+  (match tokens
+    [(list 'INIT xs ...) (parse-state-declaration xs index-subst #t final)]
+    [(list 'FINAL xs ...) (parse-state-declaration xs index-subst init #t)]
+    [(list 'STATE xs ...) (parse-state-declaration xs index-subst init final)]
+    [(list (list 'ID id)) (State (list 'ID (evaluate-index id index-subst)) init final)]))
+
+(define (evaluate-index id index-subst)
+  (begin
+  (define (evaluate-string-index body-id index-subst)
+      (match index-subst
+        ['() (string->symbol body-id)]
+        [(cons (cons index value) xs)
+         (let [(index-needle (symbol->string index))]
+           (if (string-contains? body-id index-needle)
+             (evaluate-string-index (string-replace body-id index-needle (number->string value)) xs)
+             (error-index (format "State identifier ~a does not contain ~a as a substring" body-id index-needle))))])))
+  (evaluate-string-index (symbol->string id) index-subst))
 
 ;; Parse transition
 (define (parse-transition tokens)
@@ -191,5 +236,7 @@
 
 (check-expect (tokens-tuple-main (get-balanced '{ 1 2 lp 3 4 lp 5 6 rp 7 lp 8 9 rp 10 rp 11 rp 12 } 'lp 'rp))
               '(3 4 lp 5 6 rp 7 lp 8 9 rp 10))
+(check-expect (evaluate-index 'qPi (list (cons 'P 4) (cons 'i 2)))
+              'q42)
 
 (define ctm-parser-test (lambda () (test)))
