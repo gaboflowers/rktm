@@ -44,8 +44,13 @@
 <transition-block> ::= <when-block>
                      | 'for '( <for-arg> ') '{ <transition-block> '}
 
-<when-block> ::= 'when '( 'state <state-name> ') '{ <if-block> ... '}
+<when-block> ::= 'when '( 'state <state-name> ') '{ <when-body> '}
+<when-body> ::= <if-block> ... | <if-else-block> | <forall-block>
+
 <if-block> ::= 'if '( 'read <value> ') '{ <action-line> ... '}
+<if-else-block> :: = 'if '( 'read <value ') '{ <action-line> ... '} 'else '{ <action-line> ... '}
+<forall-block> ::= 'forall '{ <action-line> ... '}
+
 <action-line> ::= 'goto <state-goto> ';
                 | 'write <value> ';
                 | 'header [ '< | '> ] <int> ';

@@ -45,6 +45,8 @@
     ; transition
     ["when" (cons 'WHEN (ctm-lexer input-port))]
     ["if" (cons 'IF (ctm-lexer input-port))]
+    ["else" (cons 'ELSE (ctm-lexer input-port))]
+    ["forall" (cons 'FORALL (ctm-lexer input-port))]
     ["read" (cons 'READ (ctm-lexer input-port))]
     ["goto" (cons 'GOTO (ctm-lexer input-port))]
     ["write" (cons 'WRITE (ctm-lexer input-port))]

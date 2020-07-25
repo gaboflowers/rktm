@@ -1,0 +1,20 @@
+transition {
+	for (n from 0 to 1) {
+		when (state qn) {
+			if (read 1) {
+				goto qn+;
+				write 0;
+				header > 1;
+			}
+		}
+        for (k from 0 to 1) {
+            when (state qnk) {
+                if (read 1) {
+                    goto qn+k-;
+                    write 0;
+                    header > 1;
+                }
+            }
+        }
+	}
+}
