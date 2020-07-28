@@ -85,8 +85,8 @@ transition {
 		if (read 0) {
 			goto qb;
 			write 0;
-		}
-		forall {
+            header < 1;
+	    } else {
 			header < 1;
 		}
 	}

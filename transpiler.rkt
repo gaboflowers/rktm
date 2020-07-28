@@ -5,6 +5,12 @@
 (provide ctm-transpiler
          ctm-lex-parse-transpile)
 
+(define indent 4)
+(define start-indent-level 3)
+(define (make-indent level)
+  (make-string (* (+ level start-indent-level) indent) #\space))
+
+;; Errors
 (define (error-state [msg #f])
   (if msg
     (error 'State-error msg)
@@ -14,7 +20,6 @@
   (if msg
     (error 'Setup-error msg)
     (error 'Setup-error)))
-
 
 ;; AST checkers
 ; check-setup :: CTM-AST -> (void)
@@ -39,7 +44,6 @@
 (define (merge-when-same-state ast)
   (match-define (CTM-AST S A D transition) ast)
   (define (when-block-has-state? whenblock state)
-    (printf "whenblock: ~v; state: ~v~n" whenblock state)
     (match-define (WhenBlock test-state _) whenblock)
     (equal? test-state state))
   (CTM-AST S A D
@@ -135,12 +139,14 @@
 ;; Preamble
 (define (generate-preamble-macros ast)
   (match-define (CTM-AST setup alias declare _) ast)
+  (match-define (cons _ mapping) declare)
   (let ([setup-macros (generate-macros-setup setup)]
-        [alias-macros (generate-macros-alias alias)]
+        [alias-macros (generate-macros-alias alias mapping)]
         [declare-macros (generate-macros-declare declare)])
   (append setup-macros
           alias-macros
-          declare-macros)))
+          declare-macros
+          (list "#define __CTM_TRANSPILED_MACROS"))))
 
 ;; Preamble from setup
 ; generate-macros-setup :: setup -> List[C code string]
@@ -170,11 +176,11 @@
     ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]))
 
 ;; Preamble from alias
-; generate-macros-alias :: alias -> List[C code string]
-(define (generate-macros-alias alias)
+; generate-macros-alias :: alias dict -> List[C code string]
+(define (generate-macros-alias alias mapping)
   (map (lambda (alias-pair)
-         (match-define (cons (list 'ID alias-id) (list 'ID target-id)) alias-pair)
-         (format "#define ~a ~a" alias-id target-id)) alias))
+         (match-define (cons (list 'ID alias-id) target) alias-pair)
+         (format "#define ~a ~a" alias-id (dict-ref mapping target))) alias))
 
 ;; Preamble from declare
 ; generate-macros-declare :: Cons[declare dict] -> List[C code string]
@@ -197,48 +203,47 @@
 ; generate-transitions :: CTM-AST with mapping dict -> List[C code string]
 (define (generate-transitions ast)
   (match-define (CTM-AST S A (cons _ mapping) transition) ast)
-  (printf "mapping: ~v~n" (dict->list mapping))
   ;(map (lambda (s) (string-append "\t\t\t" s))
        (flatten (map (lambda (t) (generate-transition-cases t mapping)) transition)));)
 
 ; generate-transition-cases :: WhenBlock dict -> List (of variable nesting) [C code string]
 (define (generate-transition-cases when-block mapping)
   (match-define (WhenBlock state when-body) when-block)
-  (append (list (format "case ~a:" (dict-ref mapping state (lambda () (unwrap-id state))))
-                 "switch (TM_read_cell(tm)) {")
+  (append (list (format "~acase ~a:" (make-indent 0) (dict-ref mapping state (lambda () (unwrap-id state))))
+                (format "~aswitch (TM_read_cell(tm)) {" (make-indent 1)))
           (map (lambda (cs) (generate-transition-when-case cs mapping)) when-body)
           (if (when-body-has-if-block when-body) ; body has no default
-            (list "default:"
-                  "return TM_state_is_accept(tm);")
-            "")
-          (list "}"
-                "break;")))
+            (list (format "~adefault:" (make-indent 2))
+                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
+            (list ""))
+          (list (format "~a}" (make-indent 1))
+                (format "~abreak;" (make-indent 0)))))
 
 ; generate-transition-when-case :: IfBlock/IfElseBlock/Forall dict -> List[C code string]
 (define (generate-transition-when-case when-case mapping)
   (match when-case
     [(IfBlock readvalue actions) ; There might be multiple IfBlock within this WhenBlock
-     (append (list (format "case ~a:" (get-read-value readvalue)))
+     (append (list (format "~acase ~a:" (make-indent 2) (get-read-value readvalue)))
              (map (lambda (a) (generate-action a mapping)) actions)
-             (list "break;"))]
+             (list (format "~abreak;" (make-indent 3))))]
     [(IfElseBlock readvalue actions elseactions) ; This is the only block within this WhenBlock
-     (append (list (format "case ~a:" (get-read-value readvalue)))
+     (append (list (format "~acase ~a:" (make-indent 2) (get-read-value readvalue)))
                  (map (lambda (a) (generate-action a mapping)) actions)
-                 (list "break;")
-             (list "default:")
+                 (list (format "~abreak;" (make-indent 3)))
+             (list (format "~adefault:" (make-indent 2)))
                  (map (lambda (a) (generate-action a mapping)) elseactions)
-                 (list "break;"))]
+                 (list (format "~abreak;" (make-indent 3))))]
     [(Forall actions) ; This is the only block within this WhenBlock
-     (append (list "default:")
+     (append (list (format "~adefault:" (make-indent 2)))
              (map (lambda (a) (generate-action a mapping)) actions)
-             (list "break;"))]))
+             (list (format "~abreak;" (make-indent 3))))]))
 
 (define (generate-action action mapping)
   (match action
-    [(GotoAction next) (format "tm->current_state = ~a;" (dict-ref mapping next (lambda () (unwrap-id next))))]
-    [(IncrementHeader step) (format "HANDLE_HEADER(tm, TM_move_header_right(tm, ~a));" (->C-value step))]
-    [(DecrementHeader step) (format "HANDLE_HEADER(tm, TM_move_header_left(tm, ~a));" (->C-value step))]
-    [(WriteAction value) (format "TM_write_cell(tm, ~a);" (->C-value value))]))
+    [(GotoAction next) (format "~atm->current_state = ~a;" (make-indent 3) (dict-ref mapping next (lambda () (unwrap-id next))))]
+    [(IncrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_right(tm, ~a));" (make-indent 3) (->C-value step))]
+    [(DecrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_left(tm, ~a));" (make-indent 3) (->C-value step))]
+    [(WriteAction value) (format "~aTM_write_cell(tm, ~a);" (make-indent 3) (->C-value value))]))
 
 (define (get-read-value value)
   (match value

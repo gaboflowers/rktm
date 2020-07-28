@@ -1,0 +1,101 @@
+#!/usr/bin/env racket
+#lang racket
+
+(require "transpiler.rkt")
+
+(define template-location "../lib/template.c")
+
+(define input-file #f)
+(define output-file #f)
+(define replace-if-exists #f)
+
+#|
+; I want to be able to run both as `rktm -o output.c input.ctm` and
+; `rktm input.ctm -o output.c`, but command-line doesn't handle the
+; latter >:c
+
+(command-line
+  #:once-any
+  [("-o" "--output") output-arg "output file" (set! output-file output-arg)]
+  #:args (input-arg) (set! input-file input-arg))
+|#
+
+;; Arguments handling
+
+(define (rktm-parse-args args)
+  (match args
+    ['() (void)]
+    [(list arg xs ...)
+     (match arg
+       [(or "-h" "--help") (show-help)]
+       [(or "-r" "--replace") (set! replace-if-exists #t)
+                              (rktm-parse-args xs)]
+       [(or "-o" "--output")
+        (match xs
+          [(list val xss ...)
+               (set! output-file val)
+               (rktm-parse-args xss)]
+          [_ (error (format "Expected an argument to ~a" arg))])]
+       [any (if input-file
+                (error "Too many arguments")
+                (begin (set! input-file any)
+                       (rktm-parse-args xs)))])]))
+
+(define (show-help)
+  (display "rktm - CTM Transpiler\n")
+  (display "Usage: rktm <options> <input file>\n")
+  (display "Options:\n")
+  (display "\t-h | --help\t\tDisplay this help.\n")
+  (display "\t-o <output file> or\tOutput file name.\n")
+  (display "\t  --output <output file>\n")
+  (display "\t-r | --replace\t\tReplace output file if already exists.\n")
+  (display "\nIf <output file> is not passed, it will default to\n")
+  (display "<input file without extension>.c\n"))
+
+(rktm-parse-args (vector->list (current-command-line-arguments)))
+
+(unless input-file
+  (show-help)
+  (exit 1))
+
+(unless (file-exists? input-file)
+  (display (format "Input file '~a' not found.~n" input-file) (current-error-port))
+  (exit 1))
+
+(unless output-file
+  (set! output-file (path-replace-extension input-file ".c")))
+
+(when (and (file-exists? output-file)
+           (not replace-if-exists))
+  (display (format "Output file '~a' already exists. Pass `-r` to overwrite.~n" output-file) (current-error-port))
+  (exit 1))
+
+;; File utils
+(define BUFSIZE 4096)
+(define (read-whole-file port)
+  (let loop ([buffer (read-string BUFSIZE port)] [acc '("")])
+    (if (eof-object? buffer)
+      (string-join (reverse acc) "")
+      (loop (read-string BUFSIZE port) (cons buffer acc)))))
+
+;; Actual transpilation
+
+(unless (file-exists? template-location)
+  (display (format "CTM template file not found at ~a~n" template-location) (current-error-port))
+  (exit 1))
+
+
+(define (transpile input output)
+  (let ([template (read-whole-file (open-input-file template-location))]
+        [transpiled (ctm-lex-parse-transpile (open-input-file input))])
+    (let ([macros (string-join (cdr (assoc 'macros transpiled)) "\n")]
+          [program (string-join (cdr (assoc 'program transpiled)) "\n")]
+          [outport (open-output-file output #:mode 'text #:exists 'replace)])
+      (write-string (string-replace
+                        (string-replace template
+                                        #rx"(?<! )__TRANSPILED_MACROS" ; Not preceded by a space
+                                        macros)
+                        "__TRANSPILED_PROGRAM"
+                        program) outport))))
+
+(transpile input-file output-file)
