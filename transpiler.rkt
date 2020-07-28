@@ -17,11 +17,13 @@
 
 
 ;; AST checkers
+; check-setup :: CTM-AST -> (void)
 (define (check-setup ast)
   (match-define (CTM-AST setup _ _ _) ast)
   ; TODO: check that MAX_TAPE_SIZE > INIT_TAPE_SIZE
   #f)
 
+; check-aliases :: CTM-AST -> (void)
 (define (check-aliases ast)
   (match-define (CTM-AST _ alias declare _) ast)
   (match-define (States _ _ all-states) declare)
@@ -34,6 +36,23 @@
             (error-state (format "Alias ~a references to undeclared ~a state" id-alias target)))
           (loop (cdr alias-list))))))
 
+(define (merge-when-same-state ast)
+  (match-define (CTM-AST S A D transition) ast)
+  (define (when-block-has-state? whenblock state)
+    (printf "whenblock: ~v; state: ~v~n" whenblock state)
+    (match-define (WhenBlock test-state _) whenblock)
+    (equal? test-state state))
+  (CTM-AST S A D
+      (reverse (foldl (lambda (when-block acc)
+                   (match-letrec ([(WhenBlock state cases) when-block]
+                                  [idx-whenblock-already-here (index-of acc state when-block-has-state?)])
+                     (if idx-whenblock-already-here ; if there was already a WhenBlock with this state
+                       (match-let ([(WhenBlock _ previous-cases) (list-ref acc idx-whenblock-already-here)])
+                         (list-set acc idx-whenblock-already-here ; append this case list there
+                                   (WhenBlock state (append previous-cases cases))))
+                       (cons when-block acc)))) '() transition)))) ; otherwise, just add the new WhenBlock
+
+; check-transition-states :: CTM-AST -> (void)
 (define (check-transition-states ast)
   (match-define (CTM-AST S alias declare transition) ast)
   (match-let ([tstates (get-transition-states transition)]
@@ -61,20 +80,13 @@
        ; TODO: get GotoAction states
        (loop xs (cons state acc))])))
 
-
+; check-transition-values :: CTM-AST -> (void)
 (define (check-transition-values ast)
   (match-define (CTM-AST setup _ _ transition) ast)
   ; TODO
   #f)
 
-(define (get-alphabet setup)
-  (let loop ([st setup])
-    (match st
-      ['() (error-setup "Alphabet not defined")]
-      [(cons (Alphabet alphabet-lst) _) alphabet-lst]
-      [(cons any xs) (loop rest)])))
-
-
+; remove-duplicate-decclarations :: CTM-AST -> CTM-AST
 (define (remove-duplicate-declarations ast)
   (match-define (CTM-AST S A declare T) ast)
   (match-define (States init finals all) declare)
@@ -92,23 +104,28 @@
     (CTM-AST S A (cons declare mapping) T)))
 
 ;; Main transpiler
+; ctm-transpiler :: CTM-AST -> List[Cons['macros List[C code string]]
+;                                   Cons['program List[C code string]]]
 (define (ctm-transpiler ast)
   (check-setup ast)
   (check-aliases ast)
-;; TODO: merge WhenBlocks of the same state
-  (check-transition-states ast)
-  (check-transition-values ast)
-  (let ([ast (remove-duplicate-declarations ast)])
-    (let ([ast (create-state-mapping ast)])
-      (let ([macros (generate-preamble-macros ast)]
-            [program (generate-transitions ast)])
-      (list (cons 'macros macros)
-            (cons 'program program))))))
+  (let ([ast (merge-when-same-state ast)])
+      (check-transition-states ast)
+      (check-transition-values ast)
+      (let ([ast (remove-duplicate-declarations ast)])
+        (let ([ast (create-state-mapping ast)])
+          (let ([macros (generate-preamble-macros ast)]
+                [program (generate-transitions ast)])
+          (list (cons 'macros macros)
+                (cons 'program program)))))))
 
+; ctm-lex-parse-transpile :: Input port -> List[Cons['macros List[C code string]]
+;                                               Cons['program List[C code string]]]
 (define (ctm-lex-parse-transpile prog)
   (ctm-transpiler (ctm-lex-and-parse prog)))
 
 ;; Misc
+; ->C-value :: value/any -> string
 (define (->C-value val)
   (match val
     [(list 'INT n) (number->string n)]
@@ -126,6 +143,7 @@
           declare-macros)))
 
 ;; Preamble from setup
+; generate-macros-setup :: setup -> List[C code string]
 (define (generate-macros-setup setup)
   (let loop ([st setup] [acc '()])
     (match st
@@ -135,6 +153,7 @@
        (loop xs (generate-macro-setup-single-statement key val acc))]
       ['() (reverse acc)])))
 
+; generate-macros-alphabet :: List[value] -> List[C code string]
 (define (generate-macros-alphabet alphabet-lst [acc '()])
   (let ([size-line (format "#define CTM_ALPHABET_SIZE ~a" (length alphabet-lst))]
         [alphabet-macro "#define CTM_ALPHABET"]
@@ -143,6 +162,7 @@
     (cons alphabet-line
           (cons alphabet-macro (cons size-line acc)))))
 
+; generate-macros-alphabet :: setup-single-statement value  -> C code string
 (define (generate-macro-setup-single-statement key val [acc '()])
   (match key
     ['STP-BLANK_SYMBOL (cons (format "#define CTM_BLANK_SYMBOL ~a" (->C-value val)) acc)]
@@ -150,12 +170,14 @@
     ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]))
 
 ;; Preamble from alias
+; generate-macros-alias :: alias -> List[C code string]
 (define (generate-macros-alias alias)
   (map (lambda (alias-pair)
          (match-define (cons (list 'ID alias-id) (list 'ID target-id)) alias-pair)
          (format "#define ~a ~a" alias-id target-id)) alias))
 
 ;; Preamble from declare
+; generate-macros-declare :: Cons[declare dict] -> List[C code string]
 (define (generate-macros-declare declare)
   (match-define (cons (States init finals all) mapping) declare)
   (let ([number-states-line (format "#define CTM_NUMBER_OF_STATES ~a" (length all))]
@@ -172,12 +194,14 @@
           init-state-line)))
 
 ;; Program body
+; generate-transitions :: CTM-AST with mapping dict -> List[C code string]
 (define (generate-transitions ast)
   (match-define (CTM-AST S A (cons _ mapping) transition) ast)
   (printf "mapping: ~v~n" (dict->list mapping))
   ;(map (lambda (s) (string-append "\t\t\t" s))
        (flatten (map (lambda (t) (generate-transition-cases t mapping)) transition)));)
 
+; generate-transition-cases :: WhenBlock dict -> List (of variable nesting) [C code string]
 (define (generate-transition-cases when-block mapping)
   (match-define (WhenBlock state when-body) when-block)
   (append (list (format "case ~a:" (dict-ref mapping state (lambda () (unwrap-id state))))
@@ -190,6 +214,7 @@
           (list "}"
                 "break;")))
 
+; generate-transition-when-case :: IfBlock/IfElseBlock/Forall dict -> List[C code string]
 (define (generate-transition-when-case when-case mapping)
   (match when-case
     [(IfBlock readvalue actions) ; There might be multiple IfBlock within this WhenBlock
