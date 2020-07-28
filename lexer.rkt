@@ -51,6 +51,7 @@
     ["goto" (cons 'GOTO (ctm-lexer input-port))]
     ["write" (cons 'WRITE (ctm-lexer input-port))]
     ["header" (cons 'HEADER (ctm-lexer input-port))]
+    ["blank" (cons 'BLANK (ctm-lexer input-port))]
 
     [#\> (cons 'RHEAD (ctm-lexer input-port))]
     [#\< (cons 'LHEAD (ctm-lexer input-port))]

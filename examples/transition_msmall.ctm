@@ -1,0 +1,25 @@
+transition {
+    when (state qInit) {
+        forall {
+            goto q0;
+            header > 1;
+        }
+    }
+
+    for (n from 0 to 1) {
+        when (state qn) {
+            if (read 1) {
+                goto qn+;
+                write 0;
+                header > 1;
+            }
+        }
+        when (state sn) {
+            if (read 1) {
+                goto qn+;
+                write 0;
+                header > 1;
+            }
+        }
+    }
+}

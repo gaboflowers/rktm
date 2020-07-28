@@ -3,9 +3,20 @@
 (require "lexer.rkt")
 
 (provide ctm-parser
-         lex-and-parse
-         error-syntax
-         tokens-tuple  ; remove
+         ctm-lex-and-parse
+         CTM-AST
+           Alphabet
+           States
+           WhenBlock
+             IfBlock
+             IfElseBlock
+             Forall
+               GotoAction
+               WriteAction
+               IncrementHeader
+               DecrementHeader
+         #|
+         tokens-tuple
          tokens-tuple-main
          tokens-tuple-rest
          parse-setup
@@ -18,10 +29,11 @@
          get-block
          get-balanced
          group-by-pairs
+         |#
          ctm-parser-test)
 
 ;; https://stackoverflow.com/a/33984471
-(define-for-syntax VERBOSE #t)
+(define-for-syntax VERBOSE #f)
 (define-syntax (if-verbose stx)
   (syntax-case stx ()
     ((_ verb-expr non-verb-expr)
@@ -44,21 +56,10 @@
     (error 'Index-error msg)
     (error 'Index-error)))
 
-(define (error-setup [msg #f])
-  (if msg
-    (error 'Setup-error msg)
-    (error 'Setup-error)))
-
 (define (error-declare [msg #f])
   (if msg
     (error 'Declaration-error msg)
     (error 'Declaration-error)))
-
-(define (error-state [msg #f])
-  (if msg
-    (error 'State-error msg)
-    (error 'State-error)))
-
 
 (struct tokens-tuple (main rest))
 
@@ -94,14 +95,14 @@
 ; Returns the block preceded by `previous` and delimited by 'LBRA ... 'RBRA,
 ; with proper bracket balance
 (define (get-block tokens previous [lbra 'LBRA] [rbra 'RBRA])
-  (let [(found (member previous tokens))]
+  (let ([found (member previous tokens)])
     (if found
-      (letrec [(block-list (tokens-tuple-main (get-balanced found lbra rbra)))
-                (append-lst (lambda (lst x)
+      (letrec ([block-list (tokens-tuple-main (get-balanced found lbra rbra))]
+               [append-lst (lambda (lst x)
                               (match lst
                                 [(list p) (list p x)]
-                                [(list p xs ...) (cons p (append-lst xs x))]
-                                ['() '()])))]
+                                [(list xs ...) (append xs (list x))]
+                                ['() (list x)]))])
         (cons previous
             (cons lbra
                 (append-lst block-list rbra))))
@@ -157,14 +158,10 @@
     (when (member '() (list setup-block declare-block transition-block))
         (error-syntax "Missing block. Does not conform to setup {} [ alias {} ] declare {} transition {}."))
 
-    (let ([ast (CTM-AST (parse-setup setup-block)
-                          (parse-alias alias-block)
-                          (parse-declare declare-block)
-                          (parse-transition transition-block))])
-      (check-aliases ast)
-      (check-transition-states ast)
-      (check-transition-values ast)
-      ast)))
+    (CTM-AST (parse-setup setup-block)
+             (parse-alias alias-block)
+             (parse-declare declare-block)
+             (parse-transition transition-block))))
 
 ;; Parse setup
 (define (parse-setup tokens)
@@ -179,7 +176,7 @@
   (case token
     [(STP-ALPHABET) 'multiple]
     [(STP-BLANK_SYMBOL STP-MAX_TAPE_SIZE STP-MAX_NUM_TRANSITIONS) 'single]
-    [else (error-setup (format "Setup LHS ~a not defined" token))]))
+    [else (error-syntax (format "Setup LHS ~a not defined" token))]))
 
 (define (parse-setup-statements token-list [acc '()])
   (match token-list
@@ -227,8 +224,10 @@
 (define (parse-declare tokens)
   (match tokens
     [(list 'DECLARE 'LBRA declare-token-list ... 'RBRA)
-     (match-let ([(States _ _ all-states) (state-list->states (parse-declare-statements declare-token-list))])
-       (info-printf "[parse-declare] ~a states parsed~n" (length all-states)))]))
+     (let ([declare-block (state-list->states (parse-declare-statements declare-token-list))])
+         (match-let ([(States _ _ all-states) declare-block])
+           (info-printf "[parse-declare] ~a states parsed~n" (length all-states))
+           declare-block))]))
 
 
 (define (declare-statement-type token)
@@ -347,7 +346,7 @@
         (match-define (tokens-tuple if-block rest) (parse-when-if xs index-subst))
         (when (and (IfElseBlock? if-block)
                    (or (> 0 (length acc))
-                       (> 0 length rest)))
+                       (> 0 (length rest))))
           (error-syntax "`if/else` must be the only statement within a `when` block"))
         (parse-when-body rest index-subst (cons if-block acc))]
     [(list 'FORALL xs ...)
@@ -441,7 +440,6 @@
                       (odds (cddr lst))
                       '()))))
 
-
 (define (evaluate-moving-state moving-state index-subst)
   (let [(new-index-subst (calculate-index-substitutions (group-by-pairs (reverse moving-state))
                                                          index-subst))
@@ -450,27 +448,9 @@
 
     (evaluate-string-index state-expr new-index-subst)))
 
-;; AST checkers
-(define (check-aliases ast)
-  (match-define (CTM-AST _ alias declare _) ast)
-  (match-define (States _ _ all-states) declare)
-  (let loop ([alias-list alias])
-    (unless (empty? alias-list)
-      (let ([alias-target (cdr (car alias-list))])
-          (when (not (member alias-target all-states))
-            (match-define (list 'ID target) alias-target)
-            (match-define (list 'ID id-alias) (caar alias-list))
-            (error-state (format "Alias ~a references to undeclared ~a state" id-alias target)))
-          (loop (cdr alias-list))))))
-
-(define (check-transition-states ast)
-  #f)
-(define (check-transition-values ast)
-  #f)
-
 ;; Colophon
 
-(define (lex-and-parse prog)
+(define (ctm-lex-and-parse prog)
   (ctm-parser (ctm-lexer prog)))
 
 

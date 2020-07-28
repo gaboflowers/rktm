@@ -1,6 +1,9 @@
 
 <line> ::= <any> ';
-<block> = '{ [ <line> | <block> ]* '}
+<block> ::= '{ [ <line> | <block> ]* '}
+<value> ::= <int> | \'<char>\' | 'blank
+<int> ::= /\d+/
+<char> ::= /[\x00-\x7F]/
 
 // setup
 
@@ -25,7 +28,6 @@
 <state-name> ::=  <identifier>
 
 <identifier> ::= /[A-Za-z_]\w*/
-<int> ::= /\d+/
 <for-arg> ::= <identifier> 'from <int> 'to <int>
 
 // declare
@@ -48,7 +50,7 @@
 <when-body> ::= <if-block> ... | <if-else-block> | <forall-block>
 
 <if-block> ::= 'if '( 'read <value> ') '{ <action-line> ... '}
-<if-else-block> :: = 'if '( 'read <value ') '{ <action-line> ... '} 'else '{ <action-line> ... '}
+<if-else-block> :: = 'if '( 'read <value> ') '{ <action-line> ... '} 'else '{ <action-line> ... '}
 <forall-block> ::= 'forall '{ <action-line> ... '}
 
 <action-line> ::= 'goto <state-goto> ';

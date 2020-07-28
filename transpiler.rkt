@@ -1,0 +1,230 @@
+#lang racket
+
+(require "parser.rkt")
+
+(provide ctm-transpiler
+         ctm-lex-parse-transpile)
+
+(define (error-state [msg #f])
+  (if msg
+    (error 'State-error msg)
+    (error 'State-error)))
+
+(define (error-setup [msg #f])
+  (if msg
+    (error 'Setup-error msg)
+    (error 'Setup-error)))
+
+
+;; AST checkers
+(define (check-setup ast)
+  (match-define (CTM-AST setup _ _ _) ast)
+  ; TODO: check that MAX_TAPE_SIZE > INIT_TAPE_SIZE
+  #f)
+
+(define (check-aliases ast)
+  (match-define (CTM-AST _ alias declare _) ast)
+  (match-define (States _ _ all-states) declare)
+  (let loop ([alias-list alias])
+    (unless (empty? alias-list)
+      (let ([alias-target (cdr (car alias-list))])
+          (when (not (member alias-target all-states))
+            (match-define (list 'ID target) alias-target)
+            (match-define (list 'ID id-alias) (caar alias-list))
+            (error-state (format "Alias ~a references to undeclared ~a state" id-alias target)))
+          (loop (cdr alias-list))))))
+
+(define (check-transition-states ast)
+  (match-define (CTM-AST S alias declare transition) ast)
+  (match-let ([tstates (get-transition-states transition)]
+              [alias-states (get-aliases alias)]
+              [(States _ _ declare-states) declare])
+    (let loop ([ts tstates])
+      (match ts
+        ['() (void)]
+        [(cons state xs)
+         (if (not (or (member state alias-states)
+                      (member state declare-states)))
+           (error-state (format "State ~a in transition references to undeclared state or alias" state))
+           (loop xs))]))))
+
+; get-aliases :: List[Cons[A B]] -> List[A]
+(define (get-aliases alias)
+  (map car alias))
+
+; get-transition-states :: List[WhenBlock] -> List[List['ID id]]
+(define (get-transition-states transition)
+  (let loop ([ts transition] [acc '()])
+    (match ts
+      ['() (reverse acc)]
+      [(cons (WhenBlock state when-body) xs)
+       ; TODO: get GotoAction states
+       (loop xs (cons state acc))])))
+
+
+(define (check-transition-values ast)
+  (match-define (CTM-AST setup _ _ transition) ast)
+  ; TODO
+  #f)
+
+(define (get-alphabet setup)
+  (let loop ([st setup])
+    (match st
+      ['() (error-setup "Alphabet not defined")]
+      [(cons (Alphabet alphabet-lst) _) alphabet-lst]
+      [(cons any xs) (loop rest)])))
+
+
+(define (remove-duplicate-declarations ast)
+  (match-define (CTM-AST S A declare T) ast)
+  (match-define (States init finals all) declare)
+  (CTM-AST S A (States init (remove-duplicates finals)
+               (remove-duplicates all)) T))
+
+; Modifies the `declare` part of the AST, making it a pair
+; whose car is the old States struct, and its cdr is a
+; dict : State id -> Integer
+(define (create-state-mapping ast)
+  (match-define (CTM-AST S A declare T) ast)
+  (match-define (States _ _ all-states) declare)
+  (let ([mapping (make-hash (map cons all-states
+                                 (sequence->list (in-range 1 (add1 (length all-states))))))])
+    (CTM-AST S A (cons declare mapping) T)))
+
+;; Main transpiler
+(define (ctm-transpiler ast)
+  (check-setup ast)
+  (check-aliases ast)
+;; TODO: merge WhenBlocks of the same state
+  (check-transition-states ast)
+  (check-transition-values ast)
+  (let ([ast (remove-duplicate-declarations ast)])
+    (let ([ast (create-state-mapping ast)])
+      (let ([macros (generate-preamble-macros ast)]
+            [program (generate-transitions ast)])
+      (list (cons 'macros macros)
+            (cons 'program program))))))
+
+(define (ctm-lex-parse-transpile prog)
+  (ctm-transpiler (ctm-lex-and-parse prog)))
+
+;; Misc
+(define (->C-value val)
+  (match val
+    [(list 'INT n) (number->string n)]
+    [(list 'CHAR c) (format "'~a'" c)]
+    [x (~a x)]))
+
+;; Preamble
+(define (generate-preamble-macros ast)
+  (match-define (CTM-AST setup alias declare _) ast)
+  (let ([setup-macros (generate-macros-setup setup)]
+        [alias-macros (generate-macros-alias alias)]
+        [declare-macros (generate-macros-declare declare)])
+  (append setup-macros
+          alias-macros
+          declare-macros)))
+
+;; Preamble from setup
+(define (generate-macros-setup setup)
+  (let loop ([st setup] [acc '()])
+    (match st
+      [(list (Alphabet alphabet-lst) xs ...)
+       (loop xs (generate-macros-alphabet alphabet-lst acc))]
+      [(list (cons key val) xs ...)
+       (loop xs (generate-macro-setup-single-statement key val acc))]
+      ['() (reverse acc)])))
+
+(define (generate-macros-alphabet alphabet-lst [acc '()])
+  (let ([size-line (format "#define CTM_ALPHABET_SIZE ~a" (length alphabet-lst))]
+        [alphabet-macro "#define CTM_ALPHABET"]
+        [alphabet-line (format "int ctm_alphabet[CTM_ALPHABET_SIZE] = {~a};"
+                              (string-join (map ->C-value alphabet-lst) ","))])
+    (cons alphabet-line
+          (cons alphabet-macro (cons size-line acc)))))
+
+(define (generate-macro-setup-single-statement key val [acc '()])
+  (match key
+    ['STP-BLANK_SYMBOL (cons (format "#define CTM_BLANK_SYMBOL ~a" (->C-value val)) acc)]
+    ['STP-MAX_TAPE_SIZE (cons (format "#define CTM_MAX_TAPE_SIZE ~a" (->C-value val)) acc)]
+    ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]))
+
+;; Preamble from alias
+(define (generate-macros-alias alias)
+  (map (lambda (alias-pair)
+         (match-define (cons (list 'ID alias-id) (list 'ID target-id)) alias-pair)
+         (format "#define ~a ~a" alias-id target-id)) alias))
+
+;; Preamble from declare
+(define (generate-macros-declare declare)
+  (match-define (cons (States init finals all) mapping) declare)
+  (let ([number-states-line (format "#define CTM_NUMBER_OF_STATES ~a" (length all))]
+        [states-macro "#define CTM_STATES"]
+        [states-line (format "int ctm_states[CTM_NUMBER_OF_STATES] = {~a};"
+                             (string-join (map (lambda (state) (->C-value (dict-ref mapping state))) all) ","))]
+        [number-final-states-line (format "#define CTM_NUMBER_OF_FINAL_STATES ~a" (length finals))]
+        [final-states-macro "#define CTM_FINAL_STATES"]
+        [final-states-line (format "int ctm_final_states[CTM_NUMBER_OF_FINAL_STATES] = {~a};"
+                             (string-join (map (lambda (state) (->C-value (dict-ref mapping state))) finals) ","))]
+        [init-state-line (format "#define CTM_INIT_STATE ~a" (dict-ref mapping init))])
+    (list number-states-line states-macro states-line
+          number-final-states-line final-states-macro final-states-line
+          init-state-line)))
+
+;; Program body
+(define (generate-transitions ast)
+  (match-define (CTM-AST S A (cons _ mapping) transition) ast)
+  (printf "mapping: ~v~n" (dict->list mapping))
+  ;(map (lambda (s) (string-append "\t\t\t" s))
+       (flatten (map (lambda (t) (generate-transition-cases t mapping)) transition)));)
+
+(define (generate-transition-cases when-block mapping)
+  (match-define (WhenBlock state when-body) when-block)
+  (append (list (format "case ~a:" (dict-ref mapping state (lambda () (unwrap-id state))))
+                 "switch (TM_read_cell(tm)) {")
+          (map (lambda (cs) (generate-transition-when-case cs mapping)) when-body)
+          (if (when-body-has-if-block when-body) ; body has no default
+            (list "default:"
+                  "return TM_state_is_accept(tm);")
+            "")
+          (list "}"
+                "break;")))
+
+(define (generate-transition-when-case when-case mapping)
+  (match when-case
+    [(IfBlock readvalue actions) ; There might be multiple IfBlock within this WhenBlock
+     (append (list (format "case ~a:" (get-read-value readvalue)))
+             (map (lambda (a) (generate-action a mapping)) actions)
+             (list "break;"))]
+    [(IfElseBlock readvalue actions elseactions) ; This is the only block within this WhenBlock
+     (append (list (format "case ~a:" (get-read-value readvalue)))
+                 (map (lambda (a) (generate-action a mapping)) actions)
+                 (list "break;")
+             (list "default:")
+                 (map (lambda (a) (generate-action a mapping)) elseactions)
+                 (list "break;"))]
+    [(Forall actions) ; This is the only block within this WhenBlock
+     (append (list "default:")
+             (map (lambda (a) (generate-action a mapping)) actions)
+             (list "break;"))]))
+
+(define (generate-action action mapping)
+  (match action
+    [(GotoAction next) (format "tm->current_state = ~a;" (dict-ref mapping next (lambda () (unwrap-id next))))]
+    [(IncrementHeader step) (format "HANDLE_HEADER(tm, TM_move_header_right(tm, ~a));" (->C-value step))]
+    [(DecrementHeader step) (format "HANDLE_HEADER(tm, TM_move_header_left(tm, ~a));" (->C-value step))]
+    [(WriteAction value) (format "TM_write_cell(tm, ~a);" (->C-value value))]))
+
+(define (get-read-value value)
+  (match value
+    ['BLANK "CTM_BLANK_SYMBOL"]
+    [x (->C-value x)]))
+
+(define (unwrap-id state)
+  (match state
+    [(list 'ID id) id]))
+
+(define (when-body-has-if-block when-body)
+  (match (car when-body)
+    [(IfBlock _ _) #t]
+    [_ #f]))

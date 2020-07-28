@@ -5,4 +5,6 @@ declare {
 	for(i from 1 to 7) {
 		state qi;
 	}
+
+    state q8;
 }
