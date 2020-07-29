@@ -1,5 +1,5 @@
 # RKTM
-Lexer, Parser and C Transpiler for the CTM (C Turing Machine) programming language.
+Lexer, Parser and C Transpiler for the [CTM (C Turing Machine) programming language](https://github.com/gaboflowers/ctm).
 
 - `rktm`: User script.
 - `install`: Installation script.
