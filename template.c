@@ -85,9 +85,6 @@ int main(int argc, char *argv[]) {
         switch (getopt_long(argc, argv, "hint:-v", long_options, NULL)) {
             case 'h':
                 // https://stackoverflow.com/a/2199698
-                if (strlen(CTM_HELP) > 0) {
-                    fprintf(stdout, CTM_HELP"\n");
-                }
                 fprintf(stdout, "%s is a C-based Turing Machine (or CTM)\n"
                        "As such, it is a binary program compiled from CTM language source code\n"
                        "transpiled to C, which simulates a particular Turing Machine.\n\n"
@@ -132,7 +129,7 @@ int main(int argc, char *argv[]) {
                 verbose = 1;
                 break;
             default:
-                fprintf(stderr, "Usage: %s [ -h | -[t|T] [tape] | --[stdin] | -i ]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [ -h | -i | -n | -t [tape] | --[stdin] | -v ]\n", argv[0]);
                 return -1;
             case -1:
                 goto finish_options;
