@@ -175,7 +175,8 @@
 (define (setup-statement-type token)
   (case token
     [(STP-ALPHABET) 'multiple]
-    [(STP-BLANK_SYMBOL STP-MAX_TAPE_SIZE STP-MAX_NUM_TRANSITIONS) 'single]
+    [(STP-BLANK_SYMBOL STP-INIT_TAPE_SIZE STP-MAX_TAPE_SIZE STP-MAX_NUM_TRANSITIONS
+      STP-PRINT_STATUS STP-ALLOW_PARTIAL_ACCEPT) 'single]
     [else (error-syntax (format "Setup LHS ~a not defined" token))]))
 
 (define (parse-setup-statements token-list [acc '()])
@@ -209,6 +210,7 @@
 ;; Parse alias
 (define (parse-alias tokens)
   (match tokens
+    ['() '()]
     [(list 'ALIAS 'LBRA alias-token-list ... 'RBRA)
      (let ([alias-block (parse-alias-statements alias-token-list)])
        (info-printf "[parse-alias] ~a state aliases parsed~n" (length alias-block))

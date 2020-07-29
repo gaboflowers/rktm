@@ -1,9 +1,11 @@
 #!/usr/bin/env racket
 #lang racket
 
-(require "transpiler.rkt")
+(require racket/runtime-path)
+(define-runtime-module-path-index transpiler-location "../lib/rktm/transpiler.rkt")
+(define ctm-lex-parse-transpile (dynamic-require transpiler-location 'ctm-lex-parse-transpile))
 
-(define template-location "../lib/template.c")
+(define-runtime-path template-location "../lib/rktm/template.c")
 
 (define input-file #f)
 (define output-file #f)

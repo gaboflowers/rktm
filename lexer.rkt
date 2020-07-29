@@ -35,8 +35,11 @@
     ; setup
     ["alphabet" (cons 'STP-ALPHABET (ctm-lexer input-port))]
     ["blank_symbol" (cons 'STP-BLANK_SYMBOL (ctm-lexer input-port))]
+    ["init_tape_size" (cons 'STP-INIT_TAPE_SIZE (ctm-lexer input-port))]
     ["max_tape_size" (cons 'STP-MAX_TAPE_SIZE (ctm-lexer input-port))]
     ["max_number_transitions" (cons 'STP-MAX_NUM_TRANSITIONS (ctm-lexer input-port))]
+    ["print_status" (cons 'STP-PRINT_STATUS (ctm-lexer input-port))]
+    ["allow_partial_accept" (cons 'STP-ALLOW_PARTIAL_ACCEPT (ctm-lexer input-port))]
 
     ; declare
     ["init" (cons 'INIT (ctm-lexer input-port))]

@@ -172,8 +172,12 @@
 (define (generate-macro-setup-single-statement key val [acc '()])
   (match key
     ['STP-BLANK_SYMBOL (cons (format "#define CTM_BLANK_SYMBOL ~a" (->C-value val)) acc)]
+    ['STP-INIT_TAPE_SIZE (cons (format "#define CTM_INIT_TAPE_SIZE ~a" (->C-value val)) acc)]
     ['STP-MAX_TAPE_SIZE (cons (format "#define CTM_MAX_TAPE_SIZE ~a" (->C-value val)) acc)]
-    ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]))
+    ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]
+    ['STP-PRINT_STATUS (cons (format "#define CTM_PRINT_STATUS ~a" (->C-value val)) acc)]
+    ['STP-ALLOW_PARTIAL_ACCEPT (cons (format "#define CTM_ALLOW_PARTIAL_ACCEPT ~a" (->C-value val)) acc)]))
+
 
 ;; Preamble from alias
 ; generate-macros-alias :: alias dict -> List[C code string]
@@ -187,15 +191,12 @@
 (define (generate-macros-declare declare)
   (match-define (cons (States init finals all) mapping) declare)
   (let ([number-states-line (format "#define CTM_NUMBER_OF_STATES ~a" (length all))]
-        [states-macro "#define CTM_STATES"]
-        [states-line (format "int ctm_states[CTM_NUMBER_OF_STATES] = {~a};"
-                             (string-join (map (lambda (state) (->C-value (dict-ref mapping state))) all) ","))]
         [number-final-states-line (format "#define CTM_NUMBER_OF_FINAL_STATES ~a" (length finals))]
         [final-states-macro "#define CTM_FINAL_STATES"]
         [final-states-line (format "int ctm_final_states[CTM_NUMBER_OF_FINAL_STATES] = {~a};"
                              (string-join (map (lambda (state) (->C-value (dict-ref mapping state))) finals) ","))]
         [init-state-line (format "#define CTM_INIT_STATE ~a" (dict-ref mapping init))])
-    (list number-states-line states-macro states-line
+    (list number-states-line
           number-final-states-line final-states-macro final-states-line
           init-state-line)))
 
