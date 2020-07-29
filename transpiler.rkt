@@ -217,6 +217,10 @@
             (list (format "~adefault:" (make-indent 2))
                   (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
             (list ""))
+          (if (not (when-body-has-read-value? when-body 'BLANK)) ; non handled `blank` as stop by default
+            (list (format "~acase CTM_BLANK_SYMBOL:" (make-indent 2))
+                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
+            (list ""))
           (list (format "~a}" (make-indent 1))
                 (format "~abreak;" (make-indent 0)))))
 
@@ -256,6 +260,20 @@
     [(list 'ID id) id]))
 
 (define (when-body-has-if-block when-body)
-  (match (car when-body)
-    [(IfBlock _ _) #t]
-    [_ #f]))
+  (match when-body
+    ['() #f]
+    [(list (IfBlock _ _) xs ...) #t]
+    [(list _ xs ...) (when-body-has-if-block xs)]))
+
+(define (when-body-has-read-value? when-body val)
+  (match when-body
+    ['() #f]
+    [(list (IfBlock vl _) xs ...)
+        (if (equal? val vl)
+         #t
+         (when-body-has-read-value? xs val))]
+    [(list (IfElseBlock vl _ _) xs ...)
+        (if (equal? val vl)
+         #t
+         (when-body-has-read-value? xs val))]))
+

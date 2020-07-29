@@ -22,6 +22,9 @@
     [(:: (:? #\-) (:+ (char-range #\0 #\9)))
         (cons `(INT ,(string->number lexeme)) (ctm-lexer input-port))]
 
+    [#\' ((char-lexer-curry) input-port)]
+    [#\" ((string-lexer-curry) input-port)]
+
     ["state" (cons 'STATE (ctm-lexer input-port))]
     ["for" (cons 'FOR (ctm-lexer input-port))]
     ["from" (cons 'FROM (ctm-lexer input-port))]
@@ -68,6 +71,18 @@
     [whitespace (ctm-lexer input-port)]
     [(eof) '()]
     ))
+
+(define char-lexer-curry
+  (lambda ([acc '()])
+      (lexer
+        [#\' (cons `(CHAR ,(string-join (reverse acc) "")) (ctm-lexer input-port))]
+        [any-char ((char-lexer-curry (cons lexeme acc)) input-port)])))
+
+(define string-lexer-curry
+  (lambda ([acc '()])
+      (lexer
+        [#\" (cons `(STRING ,(string-join (reverse acc) "")) (ctm-lexer input-port))]
+        [any-char ((char-lexer-curry (cons lexeme acc)) input-port)])))
 
 (define comment-block-lexer
   (lexer
