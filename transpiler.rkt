@@ -233,8 +233,15 @@
     ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]
     ['STP-PRINT_STATUS (cons (format "#define CTM_PRINT_STATUS ~a" (->C-value val)) acc)]
     ['STP-ALLOW_PARTIAL_ACCEPT (cons (format "#define CTM_ALLOW_PARTIAL_ACCEPT ~a" (->C-value val)) acc)]
-    ['STP-HALT_ON_UNHANDLED_BLANK (cons (format "#define CTM_HALT_ON_UNHANDLED_BLANK ~a" (->C-value val)) acc)]))
+    ['STP-HALT_ON_UNHANDLED_BLANK (cons (format "#define CTM_HALT_ON_UNHANDLED_BLANK ~a" (->C-value val)) acc)]
+    ['STP-DEFAULT_CELL_TYPE (cons (format "#define CTM_DEFAULT_CELL_TYPE ~a" (type->Cmacro val)) acc)]
+    ['STP-INIT_POS (cons (format "#define CTM_INIT_POS ~a" (->C-value val)) acc)]))
 
+(define (type->Cmacro cell-type)
+  (case cell-type
+    [(STP-TYPE-INT) "CELL_TYPE_INT"]
+    [(STP-TYPE-CHAR) "CELL_TYPE_CHAR"]
+    [else (error-setup (format "Unknown cell type ~a" cell-type))]))
 
 ;; Preamble from alias
 ; generate-macros-alias :: alias dict -> List[C code string]
@@ -247,6 +254,8 @@
 ; generate-macros-declare :: Cons[declare dict] -> List[C code string]
 (define (generate-macros-declare declare)
   (match-define (cons (States init finals all) mapping) declare)
+  (when (not init)
+    (error-state "init state not declared"))
   (let ([number-states-line (format "#define CTM_NUMBER_OF_STATES ~a" (length all))]
         [number-final-states-line (format "#define CTM_NUMBER_OF_FINAL_STATES ~a" (length finals))]
         [final-states-macro "#define CTM_FINAL_STATES"]

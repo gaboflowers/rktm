@@ -49,7 +49,7 @@ int TM_run(TM *tm) {
     int transitions_count = 0;
     while (transitions_count < CTM_MAX_NUMBER_TRANSITIONS) {
 #if CTM_PRINT_STATUS
-        TM_print(tm, transitions_count);
+        TM_show_status(tm, transitions_count);
 #endif // CTM_PRINT_STATUS
         switch(tm->current_state) {
             // <program>
@@ -145,6 +145,7 @@ finish_options: ;
                        CTM_DEFAULT_CELL_TYPE);
 
     tm->current_state = CTM_INIT_STATE;
+    tm->current_pos = CTM_INIT_POS;
     tm->final_states = ctm_final_states;
     tm->number_of_states = CTM_NUMBER_OF_STATES;
     tm->number_of_final_states = CTM_NUMBER_OF_FINAL_STATES;
@@ -171,6 +172,8 @@ finish_options: ;
             printf("TM rejected!\n");
         }
     }
+
+    TM_print_output(tm);
 
     TM_free(tm);
     if (input_from_stdin) {

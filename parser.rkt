@@ -177,7 +177,8 @@
   (case token
     [(STP-ALPHABET) 'multiple]
     [(STP-BLANK_SYMBOL STP-INIT_TAPE_SIZE STP-MAX_TAPE_SIZE STP-MAX_NUM_TRANSITIONS
-      STP-PRINT_STATUS STP-ALLOW_PARTIAL_ACCEPT STP-HALT_ON_UNHANDLED_BLANK) 'single]
+      STP-PRINT_STATUS STP-ALLOW_PARTIAL_ACCEPT STP-HALT_ON_UNHANDLED_BLANK
+      STP-DEFAULT_CELL_TYPE STP-INIT_POS) 'single]
     [else (error-syntax (format "Setup LHS ~a not defined" token))]))
 
 (define (parse-setup-statements token-list [acc '()])
