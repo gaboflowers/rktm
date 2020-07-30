@@ -42,6 +42,9 @@
             (error-state (format "Alias ~a references to undeclared ~a state" id-alias target)))
           (loop (cdr alias-list))))))
 
+; merge-when-same-state :: CTM-AST -> CTM-AST
+; Merge all WhenBlocks that have the same state into one
+; (cases are put into the into the first matching WhenBlock in the transition list)
 (define (merge-when-same-state ast)
   (match-define (CTM-AST S A D transition) ast)
   (define (when-block-has-state? whenblock state)
@@ -56,6 +59,50 @@
                          (list-set acc idx-whenblock-already-here ; append this case list there
                                    (WhenBlock state (append previous-cases cases))))
                        (cons when-block acc)))) '() transition)))) ; otherwise, just add the new WhenBlock
+
+; merge-when-same-state :: CTM-AST -> CTM-AST
+; Within a WhenBlock, merge all the when-cases (IfBlock/IfElseBlock/Forall) of the
+; same type that read the same value into one.
+; (cases are put into the into the first matching when-case in the WhenBlock body)
+(define (merge-when-same-read ast)
+  (match-define (CTM-AST setup A D transition) ast)
+  (define blank-symbol (get-blank-symbol setup))
+  ; if "blank_symbol = -1", I want to catch both "if (read blank)" and "if (read -1)"
+  (define (implicit-if-blank id)
+    (if blank-symbol ; if predefined blank symbol...
+      (if (equal? 'BLANK id)
+        blank-symbol ; ...translate "blank" to its value
+        id)
+      id))
+  (define (same-value? x y)
+    (equal? (implicit-if-blank x) (implicit-if-blank y)))
+  ; case-list-has-case? :: IfBlock/IfElseBlock/Forall IfBlock/IfElseBlock/Forall -> boolean
+  ; #t iff both cases are the same type and read the same value
+  (define (case-list-has-case? test-case when-case)
+    (match/values (values test-case when-case)
+      [((IfBlock testval _) (IfBlock readval _)) (same-value? testval readval)]
+      [((IfElseBlock testval _ _) (IfElseBlock readval _ _)) (same-value? testval readval)]
+      [((Forall _) (Forall _)) #t]
+      [(else _) #f]))
+  (CTM-AST setup A D
+      (map (lambda (when-block)
+             (match-let ([(WhenBlock state cases) when-block])
+               (WhenBlock state
+                   (reverse (foldl (lambda (when-case acc) ; when-case: IfBlock/IfElseBlock/Forall
+                             (let ([idx-whencase-already-here (index-of acc when-case case-list-has-case?)])
+                               (if idx-whencase-already-here
+                                 (list-set acc idx-whencase-already-here
+                                     (let ([previous-when-case (list-ref acc idx-whencase-already-here)])
+                                       (match/values (values previous-when-case when-case)
+                                         [((IfBlock val previous-actions) (IfBlock _ new-actions))
+                                              (IfBlock val (append previous-actions new-actions))]
+                                         [((IfElseBlock val prev-pos-actions prev-neg-actions) (IfElseBlock _ new-pos-actions new-neg-actions))
+                                              (IfElseBlock val (append prev-pos-actions new-pos-actions)
+                                                               (append prev-neg-actions new-neg-actions))]
+                                         [((Forall prev-actions) (Forall new-actions))
+                                              (Forall (append prev-actions new-actions))])))
+                                 (cons when-case acc))))
+                              '() cases))))) transition)))
 
 ; check-transition-states :: CTM-AST -> (void)
 (define (check-transition-states ast)
@@ -91,7 +138,7 @@
   ; TODO
   #f)
 
-; remove-duplicate-decclarations :: CTM-AST -> CTM-AST
+; remove-duplicate-declarations :: CTM-AST -> CTM-AST
 (define (remove-duplicate-declarations ast)
   (match-define (CTM-AST S A declare T) ast)
   (match-define (States init finals all) declare)
@@ -124,11 +171,12 @@
   (check-setup ast)
   (check-aliases ast)
   (let ([ast (merge-when-same-state ast)])
-      (check-transition-states ast)
-      (check-transition-values ast)
-      (let ([ast (remove-duplicate-declarations ast)])
-        (let ([ast (create-state-mapping ast)])
-          ast))))
+    (let ([ast (merge-when-same-read ast)])
+          (check-transition-states ast)
+          (check-transition-values ast)
+          (let ([ast (remove-duplicate-declarations ast)])
+            (let ([ast (create-state-mapping ast)])
+              ast)))))
 
 
 ; ctm-lex-parse-transpile :: Input port -> List[Cons['macros List[C code string]]
@@ -226,10 +274,9 @@
                   (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
             (list ""))
           (if (not (when-body-has-read-blank-symbol? when-body setup)) ; non handled `blank` as stop by default
-            (begin (printf "~v doesnt have blank symbol~n" when-body)
             (list (format "~acase CTM_BLANK_SYMBOL:" (make-indent 2))
-                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3))))
-            (begin (printf "~v already has bk sym~n" when-body) (list "")))
+                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
+                  (list ""))
           (list (format "~a}" (make-indent 1))
                 (format "~abreak;" (make-indent 0)))))
 
@@ -276,7 +323,6 @@
 
 ; when-body-has-read-value? :: List[IfBlock/IfElseBlock/Forall] Value -> boolean
 (define (when-body-has-read-value? when-body val)
-  (printf "wbhrb ~v ?~n" val)
   (match when-body
     ['() #f]
     [(list (IfBlock vl _) xs ...)
@@ -303,7 +349,7 @@
 (define (get-blank-symbol setup)
   (let ([blank-entry (setup-lookup 'STP-BLANK_SYMBOL setup)])
     (if blank-entry
-      (begin (printf "BK entry: ~v~n" blank-entry) blank-entry)
+      blank-entry
       #f)))
 
 ; when-body-has-read-blank-symbol? :: List[IfBlock/IfElseBlock/Forall] setup -> boolean
