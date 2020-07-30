@@ -3,7 +3,8 @@
 (require "parser.rkt")
 
 (provide ctm-transpiler
-         ctm-lex-parse-transpile)
+         ctm-lex-parse-transpile
+         ctm-preprocess)
 
 (define indent 4)
 (define start-indent-level 3)
@@ -108,9 +109,18 @@
     (CTM-AST S A (cons declare mapping) T)))
 
 ;; Main transpiler
-; ctm-transpiler :: CTM-AST -> List[Cons['macros List[C code string]]
-;                                   Cons['program List[C code string]]]
+
+; ctm-transpiler :: Modified CTM-AST -> List[Cons['macros List[C code string]]
+;                                            Cons['program List[C code string]]]
 (define (ctm-transpiler ast)
+   (let ([ast (ctm-preprocess ast)])
+      (let ([macros (generate-preamble-macros ast)]
+            [program (generate-transitions ast)])
+      (list (cons 'macros macros)
+            (cons 'program program)))))
+
+; ctm-preprocess :: CTM-AST -> Modified CTM-AST
+(define (ctm-preprocess ast)
   (check-setup ast)
   (check-aliases ast)
   (let ([ast (merge-when-same-state ast)])
@@ -118,10 +128,8 @@
       (check-transition-values ast)
       (let ([ast (remove-duplicate-declarations ast)])
         (let ([ast (create-state-mapping ast)])
-          (let ([macros (generate-preamble-macros ast)]
-                [program (generate-transitions ast)])
-          (list (cons 'macros macros)
-                (cons 'program program)))))))
+          ast))))
+
 
 ; ctm-lex-parse-transpile :: Input port -> List[Cons['macros List[C code string]]
 ;                                               Cons['program List[C code string]]]
@@ -203,12 +211,12 @@
 ;; Program body
 ; generate-transitions :: CTM-AST with mapping dict -> List[C code string]
 (define (generate-transitions ast)
-  (match-define (CTM-AST S A (cons _ mapping) transition) ast)
+  (match-define (CTM-AST setup A (cons _ mapping) transition) ast)
   ;(map (lambda (s) (string-append "\t\t\t" s))
-       (flatten (map (lambda (t) (generate-transition-cases t mapping)) transition)));)
+       (flatten (map (lambda (t) (generate-transition-cases t mapping setup)) transition)));)
 
 ; generate-transition-cases :: WhenBlock dict -> List (of variable nesting) [C code string]
-(define (generate-transition-cases when-block mapping)
+(define (generate-transition-cases when-block mapping setup)
   (match-define (WhenBlock state when-body) when-block)
   (append (list (format "~acase ~a:" (make-indent 0) (dict-ref mapping state (lambda () (unwrap-id state))))
                 (format "~aswitch (TM_read_cell(tm)) {" (make-indent 1)))
@@ -217,10 +225,11 @@
             (list (format "~adefault:" (make-indent 2))
                   (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
             (list ""))
-          (if (not (when-body-has-read-value? when-body 'BLANK)) ; non handled `blank` as stop by default
+          (if (not (when-body-has-read-blank-symbol? when-body setup)) ; non handled `blank` as stop by default
+            (begin (printf "~v doesnt have blank symbol~n" when-body)
             (list (format "~acase CTM_BLANK_SYMBOL:" (make-indent 2))
-                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
-            (list ""))
+                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3))))
+            (begin (printf "~v already has bk sym~n" when-body) (list "")))
           (list (format "~a}" (make-indent 1))
                 (format "~abreak;" (make-indent 0)))))
 
@@ -265,7 +274,9 @@
     [(list (IfBlock _ _) xs ...) #t]
     [(list _ xs ...) (when-body-has-if-block xs)]))
 
+; when-body-has-read-value? :: List[IfBlock/IfElseBlock/Forall] Value -> boolean
 (define (when-body-has-read-value? when-body val)
+  (printf "wbhrb ~v ?~n" val)
   (match when-body
     ['() #f]
     [(list (IfBlock vl _) xs ...)
@@ -277,3 +288,29 @@
          #t
          (when-body-has-read-value? xs val))]))
 
+; setup-lookup :: symbol setup -> Value
+; like cdr assoc, but doesn't raise "non-pair found in list"
+(define (setup-lookup key setup)
+  (match setup
+    ['()    #f]
+    [(list (cons k v) xs ...)
+     (if (equal? key k)
+       v
+       (setup-lookup key xs))]
+    [(cons _ xs) (setup-lookup key xs)])) ; not a tuple, keep going
+
+; get-blank-symbol :: setup -> Value/#f
+(define (get-blank-symbol setup)
+  (let ([blank-entry (setup-lookup 'STP-BLANK_SYMBOL setup)])
+    (if blank-entry
+      (begin (printf "BK entry: ~v~n" blank-entry) blank-entry)
+      #f)))
+
+; when-body-has-read-blank-symbol? :: List[IfBlock/IfElseBlock/Forall] setup -> boolean
+(define (when-body-has-read-blank-symbol? when-body setup)
+  (let ([blank-symbol (get-blank-symbol setup)]
+        [has-explicit-blank (when-body-has-read-value? when-body 'BLANK)])
+    (if blank-symbol
+      (or (when-body-has-read-value? when-body blank-symbol)
+          has-explicit-blank)
+      has-explicit-blank)))
