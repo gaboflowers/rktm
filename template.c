@@ -20,6 +20,7 @@ __TRANSPILED_MACROS
 #include "ctm_macros.h"
 
 void show_info() {
+    show_int_arr(ctm_alphabet, CTM_ALPHABET_SIZE);
     show_macro(CTM_INIT_TAPE_SIZE);
     show_macro(CTM_MAX_TAPE_SIZE);
     show_macro(CTM_MAX_NUMBER_TRANSITIONS);
@@ -28,6 +29,7 @@ void show_info() {
     show_macro(CTM_BLANK_SYMBOL);
     show_macro(CTM_PRINT_STATUS);
     show_macro(CTM_ALLOW_PARTIAL_ACCEPT);
+    show_macro(CTM_HALT_ON_UNHANDLED_BLANK);
 }
 
 #if CTM_ALLOW_PARTIAL_ACCEPT

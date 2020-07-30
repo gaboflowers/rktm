@@ -43,6 +43,7 @@
     ["max_number_transitions" (cons 'STP-MAX_NUM_TRANSITIONS (ctm-lexer input-port))]
     ["print_status" (cons 'STP-PRINT_STATUS (ctm-lexer input-port))]
     ["allow_partial_accept" (cons 'STP-ALLOW_PARTIAL_ACCEPT (ctm-lexer input-port))]
+    ["halt_on_unhandled_blank" (cons 'STP-HALT_ON_UNHANDLED_BLANK (ctm-lexer input-port))]
 
     ; declare
     ["init" (cons 'INIT (ctm-lexer input-port))]

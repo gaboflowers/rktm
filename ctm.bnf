@@ -47,7 +47,10 @@
                      | 'for '( <for-arg> ') '{ <transition-block> '}
 
 <when-block> ::= 'when '( 'state <state-name> ') '{ <when-body> '}
-<when-body> ::= <if-block> ... | <if-else-block> | <forall-block>
+<when-body> ::= [empty]
+              | <if-block> ...
+              | <if-else-block>
+              | <when-body> <forall-block>
 
 <if-block> ::= 'if '( 'read <value> ') '{ <action-line> ... '}
 <if-else-block> :: = 'if '( 'read <value> ') '{ <action-line> ... '} 'else '{ <action-line> ... '}
@@ -58,4 +61,4 @@
                 | 'header [ '< | '> ] <int> ';
 
 <state-goto> ::= <state-name>
-               | <state-name>[ '+ | '- ]
+               | <state-name>[ '+ | '- ] // handwaving; it's a lot more complicated

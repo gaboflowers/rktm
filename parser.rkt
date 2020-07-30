@@ -11,6 +11,7 @@
              IfBlock
              IfElseBlock
              Forall
+             Forall?
                GotoAction
                WriteAction
                IncrementHeader
@@ -176,7 +177,7 @@
   (case token
     [(STP-ALPHABET) 'multiple]
     [(STP-BLANK_SYMBOL STP-INIT_TAPE_SIZE STP-MAX_TAPE_SIZE STP-MAX_NUM_TRANSITIONS
-      STP-PRINT_STATUS STP-ALLOW_PARTIAL_ACCEPT) 'single]
+      STP-PRINT_STATUS STP-ALLOW_PARTIAL_ACCEPT STP-HALT_ON_UNHANDLED_BLANK) 'single]
     [else (error-syntax (format "Setup LHS ~a not defined" token))]))
 
 (define (parse-setup-statements token-list [acc '()])
@@ -353,9 +354,6 @@
         (parse-when-body rest index-subst (cons if-block acc))]
     [(list 'FORALL xs ...)
         (match-define (tokens-tuple forall-body rest) (get-balanced xs 'LBRA 'RBRA))
-        (when (or (> 0 (length acc))
-                (> 0 (length rest)))
-              (error-syntax "`forall` must be the only statement within a `when` block"))
         (parse-when-body rest index-subst (cons (Forall (parse-actions forall-body index-subst))
                                                  acc))]
     ['() (reverse acc)]))

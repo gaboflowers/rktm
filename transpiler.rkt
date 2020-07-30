@@ -60,7 +60,7 @@
                                    (WhenBlock state (append previous-cases cases))))
                        (cons when-block acc)))) '() transition)))) ; otherwise, just add the new WhenBlock
 
-; merge-when-same-state :: CTM-AST -> CTM-AST
+; merge-when-same-read :: CTM-AST -> CTM-AST
 ; Within a WhenBlock, merge all the when-cases (IfBlock/IfElseBlock/Forall) of the
 ; same type that read the same value into one.
 ; (cases are put into the into the first matching when-case in the WhenBlock body)
@@ -232,7 +232,8 @@
     ['STP-MAX_TAPE_SIZE (cons (format "#define CTM_MAX_TAPE_SIZE ~a" (->C-value val)) acc)]
     ['STP-MAX_NUM_TRANSITIONS (cons (format "#define CTM_MAX_NUMBER_TRANSITIONS ~a" (->C-value val)) acc)]
     ['STP-PRINT_STATUS (cons (format "#define CTM_PRINT_STATUS ~a" (->C-value val)) acc)]
-    ['STP-ALLOW_PARTIAL_ACCEPT (cons (format "#define CTM_ALLOW_PARTIAL_ACCEPT ~a" (->C-value val)) acc)]))
+    ['STP-ALLOW_PARTIAL_ACCEPT (cons (format "#define CTM_ALLOW_PARTIAL_ACCEPT ~a" (->C-value val)) acc)]
+    ['STP-HALT_ON_UNHANDLED_BLANK (cons (format "#define CTM_HALT_ON_UNHANDLED_BLANK ~a" (->C-value val)) acc)]))
 
 
 ;; Preamble from alias
@@ -266,16 +267,19 @@
 ; generate-transition-cases :: WhenBlock dict -> List (of variable nesting) [C code string]
 (define (generate-transition-cases when-block mapping setup)
   (match-define (WhenBlock state when-body) when-block)
-  (append (list (format "~acase ~a:" (make-indent 0) (dict-ref mapping state (lambda () (unwrap-id state))))
-                (format "~aswitch (TM_read_cell(tm)) {" (make-indent 1)))
-          (map (lambda (cs) (generate-transition-when-case cs mapping)) when-body)
-          (if (when-body-has-if-block when-body) ; body has no default
+  (append (list (format "~acase ~a:" (make-indent 0) (dict-ref mapping state (lambda () (unwrap-id state)))) ; case (state)
+                (generate-forall-case (filter Forall? when-body) mapping) ; thanks to merge-when-same-read, theres 0 or 1 Forall in the when-body
+                (format "~aswitch (TM_read_cell(tm)) {" (make-indent 1)))   ; switch for reading
+          (map (lambda (cs) (generate-transition-when-case cs mapping)) (filter (lambda (wb) (not (Forall? wb))) when-body))
+          (if (when-body-has-if-block? when-body) ; when-body has no default
             (list (format "~adefault:" (make-indent 2))
                   (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
             (list ""))
           (if (not (when-body-has-read-blank-symbol? when-body setup)) ; non handled `blank` as stop by default
-            (list (format "~acase CTM_BLANK_SYMBOL:" (make-indent 2))
-                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3)))
+            (list "#if CTM_HALT_ON_UNHANDLED_BLANK"
+                  (format "~acase CTM_BLANK_SYMBOL:" (make-indent 2))
+                  (format "~areturn TM_state_is_accept(tm);" (make-indent 3))
+                  "#endif // CTM_HALT_ON_UNHANDLED_BLANK")
                   (list ""))
           (list (format "~a}" (make-indent 1))
                 (format "~abreak;" (make-indent 0)))))
@@ -294,17 +298,24 @@
              (list (format "~adefault:" (make-indent 2)))
                  (map (lambda (a) (generate-action a mapping)) elseactions)
                  (list (format "~abreak;" (make-indent 3))))]
-    [(Forall actions) ; This is the only block within this WhenBlock
-     (append (list (format "~adefault:" (make-indent 2)))
+    [(Forall actions)
+     (error "This shouldn't happen")
+     #;(append (list (format "~adefault:" (make-indent 2)))
              (map (lambda (a) (generate-action a mapping)) actions)
              (list (format "~abreak;" (make-indent 3))))]))
 
-(define (generate-action action mapping)
+(define (generate-forall-case forall-lst mapping)
+  (match forall-lst
+    ['() ""]
+    [(list (Forall actions))
+        (map (lambda (a) (generate-action a mapping -2)) actions)]))
+
+(define (generate-action action mapping [indent-offset 0])
   (match action
-    [(GotoAction next) (format "~atm->current_state = ~a;" (make-indent 3) (dict-ref mapping next (lambda () (unwrap-id next))))]
-    [(IncrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_right(tm, ~a));" (make-indent 3) (->C-value step))]
-    [(DecrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_left(tm, ~a));" (make-indent 3) (->C-value step))]
-    [(WriteAction value) (format "~aTM_write_cell(tm, ~a);" (make-indent 3) (->C-value value))]))
+    [(GotoAction next) (format "~atm->current_state = ~a;" (make-indent (+ 3 indent-offset)) (dict-ref mapping next (lambda () (unwrap-id next))))]
+    [(IncrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_right(tm, ~a));" (make-indent (+ 3 indent-offset)) (->C-value step))]
+    [(DecrementHeader step) (format "~aHANDLE_HEADER(tm, TM_move_header_left(tm, ~a));" (make-indent (+ 3 indent-offset)) (->C-value step))]
+    [(WriteAction value) (format "~aTM_write_cell(tm, ~a);" (make-indent (+ 3 indent-offset)) (->C-value value))]))
 
 (define (get-read-value value)
   (match value
@@ -315,11 +326,11 @@
   (match state
     [(list 'ID id) id]))
 
-(define (when-body-has-if-block when-body)
+(define (when-body-has-if-block? when-body)
   (match when-body
     ['() #f]
     [(list (IfBlock _ _) xs ...) #t]
-    [(list _ xs ...) (when-body-has-if-block xs)]))
+    [(list _ xs ...) (when-body-has-if-block? xs)]))
 
 ; when-body-has-read-value? :: List[IfBlock/IfElseBlock/Forall] Value -> boolean
 (define (when-body-has-read-value? when-body val)
@@ -332,7 +343,8 @@
     [(list (IfElseBlock vl _ _) xs ...)
         (if (equal? val vl)
          #t
-         (when-body-has-read-value? xs val))]))
+         (when-body-has-read-value? xs val))]
+    [(list (Forall _)xs ...) (when-body-has-read-value? xs val)]))
 
 ; setup-lookup :: symbol setup -> Value
 ; like cdr assoc, but doesn't raise "non-pair found in list"
