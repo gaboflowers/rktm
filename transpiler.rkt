@@ -277,7 +277,6 @@
 (define (generate-transition-cases when-block mapping setup)
   (match-define (WhenBlock state when-body) when-block)
   (append (list (format "~acase ~a:" (make-indent 0) (dict-ref mapping state (lambda () (unwrap-id state)))) ; case (state)
-                (generate-forall-case (filter Forall? when-body) mapping) ; thanks to merge-when-same-read, theres 0 or 1 Forall in the when-body
                 (format "~aswitch (TM_read_cell(tm)) {" (make-indent 1)))   ; switch for reading
           (map (lambda (cs) (generate-transition-when-case cs mapping)) (filter (lambda (wb) (not (Forall? wb))) when-body))
           (if (when-body-has-if-block? when-body) ; when-body has no default
@@ -291,6 +290,7 @@
                   "#endif // CTM_HALT_ON_UNHANDLED_BLANK")
                   (list ""))
           (list (format "~a}" (make-indent 1))
+                (generate-forall-case (filter Forall? when-body) mapping) ; thanks to merge-when-same-read, theres 0 or 1 Forall in the when-body
                 (format "~abreak;" (make-indent 0)))))
 
 ; generate-transition-when-case :: IfBlock/IfElseBlock/Forall dict -> List[C code string]
