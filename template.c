@@ -56,7 +56,7 @@ int TM_run(TM *tm) {
 __TRANSPILED_PROGRAM
             // </program>
             default:
-                return REJECT;
+                return TM_state_is_accept(tm);
         }
         transitions_count++;
     }
